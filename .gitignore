@@ -1,5 +1,9 @@
 # directories
+artifacts
+broadcast
 cache
+coverage
+docs
 node_modules
 out
 
