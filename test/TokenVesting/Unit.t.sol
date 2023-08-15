@@ -66,3 +66,63 @@ contract CreateVestingSchedule is Base {
         tokenVesting.createVestingSchedule(users.alice, block.timestamp, cliff, duration, 1, false, 100);
     }
 }
+
+contract Revoke is Base {
+    bytes32 internal revocableVestingScheduleId;
+    bytes32 internal unrevocableVestingScheduleId;
+    
+    function setUp() public override {
+        Base.setUp();
+    }
+
+    modifier withCreatedVestingSchedule(uint256 amount, bool revocable) {
+        vm.assume(amount > 0);
+        deal(address(erc20Token), address(tokenVesting), amount);
+
+        if (revocable) {
+            // create a revocable vesting schedule
+            revocableVestingScheduleId = tokenVesting.computeNextVestingScheduleIdForHolder(users.alice);
+            tokenVesting.createVestingSchedule(users.alice, block.timestamp, 0, 300, 1, true, amount);
+        } else {
+            // create a unrevocable vesting schedule
+            unrevocableVestingScheduleId = tokenVesting.computeNextVestingScheduleIdForHolder(users.alice);
+            tokenVesting.createVestingSchedule(users.alice, block.timestamp, 0, 300, 1, false, amount);
+        }
+        _;
+    }
+
+    function test_RevertWhen_VestingScheduleIsNotRevocable() external whenOwner withCreatedVestingSchedule(100, false) {
+        vm.expectRevert(bytes("TokenVesting: vesting is not revocable"));
+        tokenVesting.revoke(unrevocableVestingScheduleId);
+    }
+
+    function testFuzz_WhenRevokeWithZeroVestedAmount_VestingScheduleTotalAmountShouldBeDecreased_ByAnAmount(uint256 amount) external whenOwner withCreatedVestingSchedule(amount, true) {
+        uint256 vestingScheduleTotalAmount = tokenVesting.getVestingSchedulesTotalAmount();
+        tokenVesting.revoke(revocableVestingScheduleId);
+        assertEq(tokenVesting.getVestingSchedulesTotalAmount(), vestingScheduleTotalAmount - amount);
+    }
+
+    function testFuzz_WhenRevokeWithSomeVestedAmount_ShouldReleaseTokens(uint256 amount, uint256 nextTimestamp) external whenOwner withCreatedVestingSchedule(amount, true) {
+        nextTimestamp = bound(nextTimestamp, 1, 300);
+        vm.warp(nextTimestamp);
+
+        uint256 releasableAmount = tokenVesting.computeReleasableAmount(revocableVestingScheduleId);
+
+        assertEq(erc20Token.balanceOf(users.alice), 0);
+        tokenVesting.revoke(revocableVestingScheduleId);
+        assertEq(erc20Token.balanceOf(users.alice), releasableAmount);
+    } 
+}
+
+contract Withdraw is Base {
+    function setUp() public override {
+        Base.setUp();
+    }
+
+    function testFuzz_ShouldWithdrawable(uint256 amount) external whenOwner {
+        deal(address(erc20Token), address(tokenVesting), amount);
+        tokenVesting.withdraw(amount);
+
+        assertEq(erc20Token.balanceOf(tokenVesting.owner()), amount);
+    }
+}
